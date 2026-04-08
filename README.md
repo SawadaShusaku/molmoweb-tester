@@ -26,6 +26,7 @@
   - [Single Query](#single-query)
   - [Batch Queries](#batch-queries)
   - [Extract Accessibility Tree](#extract-accessibility-tree)
+- [Annotation Tool](annotation/README.md)
 - [License](#license)
 - [TODO](#todo)
 
@@ -234,3 +235,4 @@ Apache 2.0. See [LICENSE](LICENSE) for details.
 - [x] Inference
 - [ ] Eval
 - [ ] Training
+- [x] Annotation Tool
