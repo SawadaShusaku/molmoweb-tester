@@ -47,7 +47,7 @@ Each benchmark ships with a data file under `benchmarks/jsons/`. The `custom` be
 
 **[WebVoyager](https://arxiv.org/pdf/2401.13919)** — ~600 open-ended web tasks spanning 15 websites. Judged by GPT-4o using screenshots and the agent's final answer.
 
-**[Online Mind2Web](https://arxiv.org/pdf/2504.01382)** ([leaderboard](https://huggingface.co/spaces/osunlp/Online_Mind2Web_Leaderboard)) — 300 real-world web tasks from ~130 wensites with three difficulty levels (easy, medium, hard). Judged by `webjudge_online_mind2web`, which uses o4-mini to score trajectories against key points extracted from the task.
+**[Online Mind2Web](https://arxiv.org/pdf/2504.01382)** ([leaderboard](https://huggingface.co/spaces/osunlp/Online_Mind2Web_Leaderboard)) — 300 real-world web tasks from ~130 websites with three difficulty levels (easy, medium, hard). Judged by `webjudge_online_mind2web`, which uses o4-mini to score trajectories against key points extracted from the task.
 
 **[DeepShop](https://arxiv.org/abs/2506.02839)** — 150 tasks on Amazon.com requiring the agent to apply filters, sort, and identify product attributes. Judged by a specialized GPT-4o prompt.
 
@@ -82,7 +82,7 @@ Sends screenshots to a running MolmoWeb model server (see [Quick Start](../READM
 | `native` | In-process OLMo-native checkpoint |
 | `modal` | Modal serverless endpoint |
 
-For `native` and `local`, pass the path or HF model ID via `--endpoint_or_checkpoint`:
+For `native`, pass the local path or HF model ID via `--endpoint_or_checkpoint`:
 
 ```bash
 --inference_mode native \
@@ -143,6 +143,8 @@ Use `--num_workers 5` or higher with Browserbase — each worker gets its own is
 ---
 
 ## Running Evaluations
+
+For `molmoweb`, make sure the model server is running before starting a benchmark run (see [Quick Start](../README.md#quick-start)). API-based agents (`gemini_cua`, `gemini_axtree`, `gpt_axtree`) don't require a local server.
 
 ### MolmoWeb on WebVoyager (simple env)
 
@@ -245,7 +247,21 @@ Requires `OPENAI_API_KEY`.
 
 ### Output
 
-The judge writes a `{judge_type}_verdict.json` file into each trajectory directory and generates a summary HTML report at `results_dir/!__{judge_type}_verdicts.html`. The report includes per-website breakdowns, overall accuracy, and links to individual trajectory HTML files.
+Each completed task produces a subdirectory under `results_dir/` named by task ID:
+
+```
+results_dir/
+  <task_id>/
+    trajectory.json       # full step-by-step log (actions, observations, metadata)
+    trajectory.html       # visual replay of the trajectory
+    images/
+      screenshot_001.png
+      screenshot_002.png
+      ...
+    <judge_type>_verdict.json   # written after judging
+```
+
+After judging, a summary HTML report is written to `results_dir/!__{judge_type}_verdicts.html` with per-website breakdowns, overall accuracy, and links to individual trajectory replays.
 
 ---
 
