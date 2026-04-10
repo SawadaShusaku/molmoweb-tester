@@ -32,7 +32,7 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
         )
 
     elif dataset_name == "molmoweb_screenshot_qa":
-        return MolmoWebSyntheticQA(split=split)
+        return MolmoWebSyntheticQA(split=split, n_procs=8)
 
     elif dataset_name.startswith("molmoweb_synthetic_trajs"):
         # Optionally restrict to a single config, e.g. molmoweb_synthetic_trajs__from_template
@@ -45,6 +45,7 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
             mode="random_gaussian",
             style="molmo_web_think",
             max_past_steps=10,
+            n_procs=8,
         )
 
     elif dataset_name == "molmoweb_human_trajs":
@@ -54,7 +55,7 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
             mode="random_gaussian",
             style="molmo_web_think",
             max_past_steps=10,
-            n_procs=16,
+            n_procs=8,
         )
 
     elif dataset_name == "molmoweb_synthetic_skills":
@@ -64,7 +65,7 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
             mode="random_gaussian",
             style="molmo_web_think",
             max_past_steps=10,
-            n_procs=16,
+            n_procs=8,
         )
 
     elif dataset_name == "molmoweb_human_skills":
@@ -74,7 +75,7 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
             mode="random_gaussian",
             style="molmo_web_think",
             max_past_steps=10,
-            n_procs=16,
+            n_procs=8,
         )
 
     elif dataset_name == "molmoweb_synthetic_ground__template":
@@ -83,6 +84,7 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
             split=split,
             action_only=True,
             max_msg_per_screenshot=10,
+            n_procs=8,
         )
 
     elif dataset_name == "molmoweb_synthetic_ground__gpt":
@@ -92,6 +94,7 @@ def get_dataset_by_name(dataset_name, split) -> Dataset:
             action_only=True,
             gpt=True,
             max_msg_per_screenshot=10,
+            n_procs=8,
         )
 
     elif f"dataset/{dataset_name}" in registry.list():

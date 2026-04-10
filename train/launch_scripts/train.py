@@ -73,7 +73,7 @@ if __name__ == "__main__":
     parser.add_argument("--run_name", type=str, default="multitask_train")
     parser.add_argument("--num_checkpoints_to_keep", type=int, default=10,
                         help="Number of checkpoints to keep during training",)
-    parser.add_argument("--num_workers", default=6, type=int)
+    parser.add_argument("--num_workers", default=0, type=int)
     parser.add_argument("--prefetch_factor", default=4, type=int)
 
     parser.add_argument("--connector_lr", default=5e-6, type=float)

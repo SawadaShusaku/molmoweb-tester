@@ -7,11 +7,13 @@ import random
 import datasets
 import numpy as np
 
-from olmo.data.dataset import DATA_HOME, Dataset
+from olmo.data.dataset import Dataset, WEB_DATA_HOME, DATA_HOME
 from olmo.data.download_urls import download_pixmo_urls, filter_and_group_data
 from olmo.util import transpose_dict_of_lists, flatten_lists
 
-if DATA_HOME is not None:
+if WEB_DATA_HOME is not None:
+    PIXMO_DATASETS = join(WEB_DATA_HOME, "pixmo_datasets")
+elif DATA_HOME is not None:
     PIXMO_DATASETS = join(DATA_HOME, "pixmo_datasets")
 else:
     PIXMO_DATASETS = None
@@ -92,7 +94,7 @@ class PixMoPoints(Dataset):
             self.data = datasets.concatenate_datasets([data1, data2])
         elif kind == "basic":
             self.data = datasets.load_from_disk(
-                join(PIXMO_DATASETS, f"points-pointing-v0"), keep_in_memory=keep_in_memory)[split]
+                join(PIXMO_DATASETS, f"points-pointing"), keep_in_memory=keep_in_memory)[split]
         else:
             self.data = datasets.load_from_disk(
                 join(PIXMO_DATASETS, f"points-counting"), keep_in_memory=keep_in_memory)[split]

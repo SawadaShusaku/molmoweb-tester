@@ -6,8 +6,8 @@ import logging
 import os
 import random
 import re
+import shutil
 import multiprocessing as mp
-from collections import defaultdict
 from os.path import join, exists
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
@@ -198,10 +198,23 @@ class ScreenSpot(DatasetBase):
     @classmethod
     def download(cls, n_procs=1, check_sha=True, n_val=None, cache_only=False):
         local_name = join(WEB_DATA_HOME, "screenspot")
-        if os.path.exists(local_name):
+        img_dir = join(local_name, "imgs")
+        if os.path.exists(local_name) and os.path.exists(img_dir):
+            logging.info("ScreenSpot already downloaded, skipping.")
             return
-        ds = datasets.load_dataset("rootsautomation/ScreenSpot")
-        save_local_dataset(ds, local_name, n_procs, n_val=n_val)
+        if not os.path.exists(local_name):
+            logging.info("Downloading ScreenSpot from rootsautomation/ScreenSpot...")
+            ds = datasets.load_dataset("rootsautomation/ScreenSpot")
+            save_local_dataset(ds, local_name, n_procs, n_val=n_val)
+            logging.info(f"ScreenSpot saved to {local_name}.")
+        else:
+            ds = datasets.load_from_disk(local_name)
+        logging.info(f"Extracting images to {img_dir}...")
+        os.makedirs(img_dir, exist_ok=True)
+        for split_name in ds:
+            for row in tqdm(ds[split_name], desc=f"Saving {split_name} images"):
+                row["image"].save(join(img_dir, row["file_name"]))
+        logging.info(f"Images saved to {img_dir}.")
 
     def __init__(self, split, sample=None, keep_in_memory=False):
         self.data = datasets.load_from_disk(
@@ -249,11 +262,23 @@ class ScreenSpot(DatasetBase):
 class ScreenSpotV2(DatasetBase):
     @classmethod
     def download(cls, n_procs=1, check_sha=True, n_val=None, cache_only=False):
+        from huggingface_hub import snapshot_download
         local_name = join(WEB_DATA_HOME, "screenspot_v2")
-        if os.path.exists(local_name):
+        img_dir = join(local_name, "imgs")
+        ann_dir = join(local_name, "test")
+        if os.path.exists(img_dir) and os.path.exists(ann_dir):
+            logging.info("ScreenSpotV2 already downloaded, skipping.")
             return
-        ds = datasets.load_dataset("likaixin/ScreenSpot-v2-variants")
-        save_local_dataset(ds, local_name, n_procs, n_val=n_val)
+        logging.info("Downloading ScreenSpotV2 from likaixin/ScreenSpot-v2-variants...")
+        snapshot_path = snapshot_download("likaixin/ScreenSpot-v2-variants", repo_type="dataset")
+        os.makedirs(img_dir, exist_ok=True)
+        os.makedirs(ann_dir, exist_ok=True)
+        for subset in ["web", "mobile", "desktop"]:
+            shutil.copy2(join(snapshot_path, "annotations", f"{subset}.json"), join(ann_dir, f"{subset}.json"))
+        src_img_dir = join(snapshot_path, "images")
+        for fname in tqdm(os.listdir(src_img_dir), desc="Copying ScreenSpotV2 images"):
+            shutil.copy2(join(src_img_dir, fname), join(img_dir, fname))
+        logging.info(f"ScreenSpotV2 saved to {local_name}.")
 
     def __init__(self, split, subset="all", sample=None, keep_in_memory=False):
         assert subset in [
@@ -330,21 +355,30 @@ class ScreenSpotV2(DatasetBase):
 
 
 
-def _save_hf_images_to_disk(hf_dataset, image_dir: str) -> None:
-    """Save each row's embedded image bytes to {image_dir}/{i:06d}.png.
+def _save_hf_images_to_disk(hf_dataset, image_dir: str) -> dict:
+    """Save each row's embedded image bytes to {image_dir}/{sha256[:16]}.png.
 
-    Skips files that already exist so re-runs are safe.  Used by
-    MolmoWebSyntheticGround and MolmoWebSyntheticQA download().
+    Filename is the first 16 hex chars of the SHA-256 of the raw bytes, making
+    it stable across re-downloads and naturally deduplicating identical images.
+    Skips files that already exist so re-runs are safe.
+
+    Returns a dict mapping original row index → absolute file path, suitable
+    for serialising to image_index.json.
     """
+    import hashlib
     os.makedirs(image_dir, exist_ok=True)
+    index: dict[int, str] = {}
     no_decode = hf_dataset.cast_column("image", datasets.Image(decode=False))
     for i, row in enumerate(tqdm(no_decode, desc="Saving images to disk")):
-        img_path = join(image_dir, f"{i:06d}.png")
-        if not exists(img_path):
-            raw = row["image"]["bytes"]
-            if raw:
+        raw = row["image"]["bytes"]
+        if raw:
+            img_hash = hashlib.sha256(raw).hexdigest()
+            img_path = join(image_dir, f"{img_hash}.png")
+            if not exists(img_path):
                 with open(img_path, "wb") as f:
                     f.write(raw)
+            index[i] = img_path
+    return index
 
 
 def _save_traj_images_to_disk(rows, image_dir: str) -> None:
@@ -361,7 +395,7 @@ def _save_traj_images_to_disk(rows, image_dir: str) -> None:
         raw_images = row.get("images") or []
         paths = row.get("image_paths") or []
         if not paths:
-            paths = [f"screenshot_{i:03d}.png" for i in range(len(raw_images))]
+            paths = [f"screenshot_{i+1:03d}.png" for i in range(len(raw_images))]
         sample_dir = join(image_dir, sample_id)
         os.makedirs(sample_dir, exist_ok=True)
         for path, img in zip(paths, raw_images):
@@ -413,11 +447,16 @@ def _iter_polars_parquet(hf_source: str, split: str, hf_shards: list | None = No
         yield row
 
 
-def _load_hf_dataset(hf_source, split, local_name, config=None):
+def _load_hf_dataset(hf_source, split, local_name, config=None, drop_columns=None):
     """Load an HF dataset, caching locally under WEB_DATA_HOME.
 
     If a local copy exists at WEB_DATA_HOME/{local_name}, loads from disk.
     Otherwise downloads from HF and saves locally.
+
+    Args:
+        drop_columns: column names to strip before saving to disk (e.g. image
+            columns whose bytes have already been extracted to individual files).
+            The returned dataset always contains all columns.
     """
     local_dir = join(WEB_DATA_HOME, local_name) if WEB_DATA_HOME else None
 
@@ -448,9 +487,32 @@ def _load_hf_dataset(hf_source, split, local_name, config=None):
         return False
 
     try:
-        ds = datasets.load_dataset(hf_source, config, split=split)
+        ds = datasets.load_dataset(hf_source, config, split=split, verification_mode="no_checks")
     except Exception as e:
         if _is_hf_load_error(e):
+            # Stale cache is the most common cause — retry with a fresh download first.
+            logging.warning(
+                f"Stale cache detected for {hf_source} — retrying with force_redownload. "
+                f"Original error: {e}"
+            )
+            try:
+                ds = datasets.load_dataset(
+                    hf_source, config, split=split, download_mode="force_redownload",
+                    verification_mode="no_checks",
+                )
+            except Exception as e2:
+                if not _is_hf_load_error(e2):
+                    raise
+                # force_redownload also failed; fall through to manual snapshot path.
+                logging.warning(
+                    f"force_redownload also failed for {hf_source} — "
+                    f"falling back to manual snapshot load. Error: {e2}"
+                )
+                e = e2
+            else:
+                e = None  # retry succeeded
+
+        if e is not None and _is_hf_load_error(e):
             from huggingface_hub import snapshot_download, list_repo_files
             import glob as _glob
             import re as _re
@@ -475,11 +537,11 @@ def _load_hf_dataset(hf_source, split, local_name, config=None):
                 )
 
             # --- Arrow repo (e.g. MolmoWeb-SyntheticQA) ---
-            # Multiple shard-count sets; pick the smallest (newest/matching card).
+            # Multiple shard-count sets; pick the largest (most up-to-date files).
             else:
                 logging.warning(
                     f"Schema mismatch in HF repo for {hf_source} — falling back to "
-                    f"direct arrow load of smallest shard set. Original error: {e}"
+                    f"direct arrow load of largest shard set. Original error: {e}"
                 )
                 split_prefix = f"{split}/" if config is None else f"{config}/{split}/"
                 arrow_names = [f for f in all_files if f.startswith(split_prefix) and f.endswith(".arrow")]
@@ -490,21 +552,50 @@ def _load_hf_dataset(hf_source, split, local_name, config=None):
                         by_count[int(m.group(1))].append(name)
                 if not by_count:
                     raise RuntimeError(f"No arrow or parquet files found for {hf_source} split={split}") from e
-                best_count = min(by_count)
+
+                # Probe the first shard of each count (smallest first) to find
+                # the set whose schema matches the expected nested format.
+                # "Largest count = newest" is not always true after a re-upload.
+                import pyarrow as _pa
+
+                def _probe_schema(shard_name):
+                    probe_dir = snapshot_download(
+                        repo_id=hf_source, repo_type="dataset",
+                        allow_patterns=[shard_name],
+                    )
+                    return _pa.ipc.open_stream(join(probe_dir, shard_name)).schema.names
+
+                best_count = None
+                for probe_count in sorted(by_count.keys()):
+                    try:
+                        names = _probe_schema(sorted(by_count[probe_count])[0])
+                        if "messages" in names or "metadata" in names:
+                            best_count = probe_count
+                            break
+                    except Exception:
+                        continue
+                if best_count is None:
+                    best_count = max(by_count)  # fallback: largest count
+
                 target_files = sorted(by_count[best_count])
                 logging.info(f"Downloading {len(target_files)} arrow files (of-{best_count:05d}) from {hf_source}")
                 repo_dir = snapshot_download(
                     repo_id=hf_source, repo_type="dataset",
-                    allow_patterns=target_files + ["train/dataset_info.json", "dataset_dict.json"],
+                    allow_patterns=target_files,
                 )
                 arrow_paths = [join(repo_dir, f) for f in target_files]
-                ds = datasets.load_dataset("arrow", data_files={split: arrow_paths}, split=split)
-        else:
+                ds = datasets.load_dataset("arrow", data_files={split: arrow_paths}, split=split, verification_mode="no_checks")
+        elif not _is_hf_load_error(e):
             raise
 
     if local_dir:
         logging.info(f"Saving to {local_dir}")
-        ds.save_to_disk(local_dir)
+        ds_to_save = ds
+        if drop_columns:
+            cols_present = [c for c in drop_columns if c in ds.column_names]
+            if cols_present:
+                ds_to_save = ds.remove_columns(cols_present)
+        ds_to_save.save_to_disk(local_dir)
 
     return ds
 
@@ -629,13 +720,22 @@ class MolmoWebSyntheticGround(DatasetBase):
     def download(cls, n_procs=None):
         for config in cls.HF_CONFIGS:
             local_dir = join(WEB_DATA_HOME, f"{cls.LOCAL_NAME}/{config}")
+            logging.info(f"Downloading {cls.LOCAL_NAME} config={config} from {cls.HF_SOURCE}...")
             hf_dataset = _load_hf_dataset(
                 cls.HF_SOURCE, cls.HF_SPLIT,
                 f"{cls.LOCAL_NAME}/{config}", config=config,
+                drop_columns=["image"],
             )
-            img_dir = join(local_dir, "images")
-            if not exists(img_dir):
-                _save_hf_images_to_disk(hf_dataset, img_dir)
+            index_path = join(local_dir, "image_index.json")
+            if not exists(index_path):
+                img_dir = join(local_dir, "images")
+                logging.info(f"Saving images for {cls.LOCAL_NAME} config={config} to {img_dir}...")
+                index = _save_hf_images_to_disk(hf_dataset, img_dir)
+                with open(index_path, "w") as f:
+                    json.dump({str(k): v for k, v in index.items()}, f)
+                logging.info(f"Saved {len(index)} images and index to {index_path}.")
+            else:
+                logging.info(f"Image index already exists for {cls.LOCAL_NAME} config={config}, skipping.")
 
     def __init__(
         self,
@@ -643,7 +743,6 @@ class MolmoWebSyntheticGround(DatasetBase):
         split: Literal["train"],
         flatten: bool = False,
         action_only: bool = False,
-        max_screenshots_per_website: int = -1,
         gpt: bool = False,
         max_msg_per_screenshot: int = -1,
         style: str = "web_grounding",
@@ -658,7 +757,6 @@ class MolmoWebSyntheticGround(DatasetBase):
         self.split = split
         self.action_only = action_only
         self.flatten = flatten
-        self.max_screenshots_per_website = max_screenshots_per_website
         self.max_msg_per_screenshot = max_msg_per_screenshot
         self.gpt = gpt
         self.style = style
@@ -676,29 +774,18 @@ class MolmoWebSyntheticGround(DatasetBase):
             f"{self.LOCAL_NAME}/{config}", config=config,
         )
 
-        # Group by website so we can limit max_screenshots_per_website
-        if self.max_screenshots_per_website > 0:
-            by_website = defaultdict(list)
-            for i, row in enumerate(hf_dataset.remove_columns(["image"])):
-                by_website[row["metadata"]["website"]].append(i)
-            rng = random.Random(RNG_SEED)
-            selected_indices = []
-            for indices in by_website.values():
-                rng.shuffle(indices)
-                selected_indices.extend(indices[: self.max_screenshots_per_website])
-            selected_indices.sort()
-            hf_dataset = hf_dataset.select(selected_indices)
+        # Load image index (maps original HF row index → file path)
+        index_path = join(WEB_DATA_HOME, f"{self.LOCAL_NAME}/{config}", "image_index.json")
+        with open(index_path) as f:
+            image_index: dict[int, str] = {int(k): v for k, v in json.load(f).items()}
 
-        # Collect per-row args without images (avoids decoding images during iteration)
+        # Collect per-row args without images
         print(f"Loading MolmoWebSyntheticGround ({config}) with {self.n_procs} process(es)...")
-        meta_dataset = hf_dataset.remove_columns(["image"])
         args = [
-            (i,
-             row["metadata"],
-             row["messages"],
+            (i, row["metadata"], row["messages"],
              self.action_only, self.flatten,
              self.max_msg_per_screenshot, self.style)
-            for i, row in enumerate(tqdm(meta_dataset, desc="Reading metadata"))
+            for i, row in enumerate(tqdm(hf_dataset, desc="Reading metadata"))
         ]
 
         # Process rows (JSON parsing + coordinate math) in parallel
@@ -717,14 +804,13 @@ class MolmoWebSyntheticGround(DatasetBase):
                 if examples:
                     result_map[row_idx] = examples
 
-        # Attach image paths (images were saved to disk during download())
-        img_dir = join(WEB_DATA_HOME, f"{self.LOCAL_NAME}/{config}", "images")
+        # Attach image paths via the stable hash-based index
         formatted_data = []
-        for i in sorted(result_map.keys()):
-            img_path = join(img_dir, f"{i:06d}.png")
-            for ex in result_map[i]:
+        for orig_idx in sorted(result_map.keys()):
+            img_path = image_index[orig_idx]
+            for ex in result_map[orig_idx]:
                 ex["image"] = img_path
-            formatted_data.extend(result_map[i])
+            formatted_data.extend(result_map[orig_idx])
 
         return formatted_data
 
@@ -745,10 +831,18 @@ class MolmoWebSyntheticQA(DatasetBase):
     @classmethod
     def download(cls, n_procs=None):
         local_dir = join(WEB_DATA_HOME, cls.LOCAL_NAME)
-        hf_dataset = _load_hf_dataset(cls.HF_SOURCE, cls.HF_SPLIT, cls.LOCAL_NAME)
-        img_dir = join(local_dir, "images")
-        if not exists(img_dir):
-            _save_hf_images_to_disk(hf_dataset, img_dir)
+        logging.info(f"Downloading {cls.LOCAL_NAME} from {cls.HF_SOURCE}...")
+        hf_dataset = _load_hf_dataset(cls.HF_SOURCE, cls.HF_SPLIT, cls.LOCAL_NAME, drop_columns=["image"])
+        index_path = join(local_dir, "image_index.json")
+        if not exists(index_path):
+            img_dir = join(local_dir, "images")
+            logging.info(f"Saving images for {cls.LOCAL_NAME} to {img_dir}...")
+            index = _save_hf_images_to_disk(hf_dataset, img_dir)
+            with open(index_path, "w") as f:
+                json.dump({str(k): v for k, v in index.items()}, f)
+            logging.info(f"Saved {len(index)} images and index to {index_path}.")
+        else:
+            logging.info(f"Image index already exists for {cls.LOCAL_NAME}, skipping.")
 
     def __init__(
         self,
@@ -790,13 +884,17 @@ class MolmoWebSyntheticQA(DatasetBase):
             logging.warning("MolmoWeb-SyntheticQA: old flat schema detected, normalizing...")
             hf_dataset = hf_dataset.map(self._normalize_row)
 
+        # Load image index (maps original HF row index → file path)
+        index_path = join(WEB_DATA_HOME, self.LOCAL_NAME, "image_index.json")
+        with open(index_path) as f:
+            image_index: dict[int, str] = {int(k): v for k, v in json.load(f).items()}
+
         # Collect per-row args without images
         print(f"Loading MolmoWebSyntheticQA with {self.n_procs} process(es)...")
-        meta_dataset = hf_dataset.remove_columns(["image"])
         args = [
             (i, row["metadata"]["website"], row["metadata"]["url"],
              row["messages"], self.style, self.flat)
-            for i, row in enumerate(tqdm(meta_dataset, desc="Reading metadata"))
+            for i, row in enumerate(tqdm(hf_dataset, desc="Reading metadata"))
         ]
 
         # Process rows in parallel
@@ -815,14 +913,13 @@ class MolmoWebSyntheticQA(DatasetBase):
                 if examples:
                     result_map[row_idx] = examples
 
-        # Attach image paths (images were saved to disk during download())
-        img_dir = join(WEB_DATA_HOME, self.LOCAL_NAME, "images")
+        # Attach image paths via the stable hash-based index
         formatted: List[Dict[str, Any]] = []
-        for i in sorted(result_map.keys()):
-            img_path = join(img_dir, f"{i:06d}.png")
-            for ex in result_map[i]:
+        for orig_idx in sorted(result_map.keys()):
+            img_path = image_index[orig_idx]
+            for ex in result_map[orig_idx]:
                 ex["image"] = img_path
-            formatted.extend(result_map[i])
+            formatted.extend(result_map[orig_idx])
 
         return formatted
 
@@ -845,14 +942,28 @@ class MolmoWebSyntheticTrajs(DatasetBase):
     @classmethod
     def download(cls, n_procs=None):
         for config in cls.HF_CONFIGS:
+            logging.info(f"Downloading {cls.LOCAL_NAME} config={config} from {cls.HF_SOURCE}...")
             _load_hf_dataset(
                 cls.HF_SOURCE, cls.HF_SPLIT,
                 f"{cls.LOCAL_NAME}/{config}", config=config,
+                drop_columns=["images"],
             )
         img_dir = join(WEB_DATA_HOME, cls.LOCAL_NAME, "images")
         if not exists(img_dir):
-            rows = list(_iter_polars_parquet(cls.HF_SOURCE, cls.HF_SPLIT))
+            logging.info(f"Saving trajectory images for {cls.LOCAL_NAME} to {img_dir}...")
+            from huggingface_hub import list_repo_files
+            all_files = list(list_repo_files(cls.HF_SOURCE, repo_type="dataset"))
+            shards = sorted(
+                f for f in all_files
+                if f.endswith(".parquet")
+                and any(f.startswith(f"data/{config}-") for config in cls.HF_CONFIGS)
+            )
+            logging.info(f"Found {len(shards)} parquet shards for {cls.LOCAL_NAME}.")
+            rows = list(_iter_polars_parquet(cls.HF_SOURCE, cls.HF_SPLIT, hf_shards=shards))
             _save_traj_images_to_disk(rows, img_dir)
+            logging.info(f"Trajectory images for {cls.LOCAL_NAME} saved to {img_dir}.")
+        else:
+            logging.info(f"Trajectory images for {cls.LOCAL_NAME} already exist at {img_dir}, skipping.")
 
     def __init__(
         self,
@@ -885,6 +996,10 @@ class MolmoWebSyntheticTrajs(DatasetBase):
     def _build_image_index(self, row: dict) -> dict:
         """Return a dict mapping screenshot filename → absolute file path on disk."""
         sample_id = row["sample_id"]
+        img_dir = join(WEB_DATA_HOME, self.LOCAL_NAME, "images", sample_id)
+        if exists(img_dir):
+            return {f: join(img_dir, f) for f in sorted(os.listdir(img_dir))}
+        # Fallback: reconstruct from in-memory images (e.g. Polars row before download).
         raw_images = row.get("images") or []
         paths = row.get("image_paths") or []
         if not paths:
@@ -892,8 +1007,7 @@ class MolmoWebSyntheticTrajs(DatasetBase):
             if isinstance(first, dict) and "path" in first:
                 paths = [img["path"] for img in raw_images]
             else:
-                paths = [f"screenshot_{i:03d}.png" for i in range(len(raw_images))]
-        img_dir = join(WEB_DATA_HOME, self.LOCAL_NAME, "images", sample_id)
+                paths = [f"screenshot_{i+1:03d}.png" for i in range(len(raw_images))]
         return {Path(p).name: join(img_dir, Path(p).name) for p in paths}
 
     def truncate_str(self, some_str: str, max_len: int, postfix: str = "... (truncated)"):
@@ -1268,11 +1382,16 @@ class MolmoWebHumanTrajs(MolmoWebSyntheticTrajs):
 
     @classmethod
     def download(cls, n_procs=None):
-        _load_hf_dataset(cls.HF_SOURCE, cls.HF_SPLIT, cls.LOCAL_NAME)
+        logging.info(f"Downloading {cls.LOCAL_NAME} from {cls.HF_SOURCE}...")
+        _load_hf_dataset(cls.HF_SOURCE, cls.HF_SPLIT, cls.LOCAL_NAME, drop_columns=["images"])
         img_dir = join(WEB_DATA_HOME, cls.LOCAL_NAME, "images")
         if not exists(img_dir):
+            logging.info(f"Saving trajectory images for {cls.LOCAL_NAME} to {img_dir}...")
             rows = list(_iter_polars_parquet(cls.HF_SOURCE, cls.HF_SPLIT))
             _save_traj_images_to_disk(rows, img_dir)
+            logging.info(f"Trajectory images for {cls.LOCAL_NAME} saved to {img_dir}.")
+        else:
+            logging.info(f"Trajectory images for {cls.LOCAL_NAME} already exist at {img_dir}, skipping.")
 
     def __init__(self, split: Literal["train"], n_procs: int = 1, **kwargs):
         kwargs.setdefault("configs", list(self.HF_CONFIGS))
@@ -1329,16 +1448,6 @@ class MolmoWebHumanTrajs(MolmoWebSyntheticTrajs):
 
         return row_idx, results
 
-    def _build_image_index(self, row: dict) -> dict:
-        """Return a dict mapping screenshot filename → absolute file path on disk."""
-        sample_id = row["sample_id"]
-        raw_images = row.get("images") or []
-        paths = row.get("image_paths") or []
-        if not paths:
-            paths = [f"screenshot_{i+1:03d}.png" for i in range(len(raw_images))]
-        img_dir = join(WEB_DATA_HOME, self.LOCAL_NAME, "images", sample_id)
-        return {Path(p).name: join(img_dir, Path(p).name) for p in paths}
-
     def _load_rows(self):
         # Use Polars to read parquet shards directly — same approach as MolmoWebSyntheticTrajs,
         # avoids the datasets library's slow Arrow→Python dict conversion for image bytes.
@@ -1391,8 +1500,9 @@ class MolmoWebSyntheticSkills(MolmoWebSyntheticTrajs):
     Downloads data directly from HuggingFace: allenai/MolmoWeb-SyntheticSkills.
 
     Corresponds to the old webolmoSynthetic__atomic_actions_*__goal__... datasets.
-    Note: the HF ``instruction`` field is all-empty; goal is extracted from the
-    first step's action_output.thought via _select_goal_from_step().
+    The HF ``instruction`` field is JSON with a single ``goal`` key containing
+    a multi-line string of chained instruction steps (goto / find_and_open /
+    fill_form / find_and_click).
     """
 
     HF_SOURCE = "allenai/MolmoWeb-SyntheticSkills"
@@ -1405,25 +1515,20 @@ class MolmoWebSyntheticSkills(MolmoWebSyntheticTrajs):
 
     @classmethod
     def download(cls, n_procs=None):
-        _load_hf_dataset(cls.HF_SOURCE, cls.HF_SPLIT, cls.LOCAL_NAME)
+        logging.info(f"Downloading {cls.LOCAL_NAME} from {cls.HF_SOURCE}...")
+        _load_hf_dataset(cls.HF_SOURCE, cls.HF_SPLIT, cls.LOCAL_NAME, drop_columns=["images"])
         img_dir = join(WEB_DATA_HOME, cls.LOCAL_NAME, "images")
         if not exists(img_dir):
+            logging.info(f"Saving trajectory images for {cls.LOCAL_NAME} to {img_dir}...")
             rows = list(_iter_polars_parquet(cls.HF_SOURCE, cls.HF_SPLIT, cls.HF_SHARDS))
             _save_traj_images_to_disk(rows, img_dir)
+            logging.info(f"Trajectory images for {cls.LOCAL_NAME} saved to {img_dir}.")
+        else:
+            logging.info(f"Trajectory images for {cls.LOCAL_NAME} already exist at {img_dir}, skipping.")
 
     def __init__(self, split: Literal["train"], **kwargs):
         kwargs.setdefault("configs", list(self.HF_CONFIGS))
         super().__init__(split, **kwargs)
-
-    def _build_image_index(self, row: dict) -> dict:
-        """Return a dict mapping screenshot filename → absolute file path on disk."""
-        sample_id = row["sample_id"]
-        raw_images = row.get("images") or []
-        paths = row.get("image_paths") or []
-        if not paths:
-            paths = [f"screenshot_{i:03d}.png" for i in range(len(raw_images))]
-        img_dir = join(WEB_DATA_HOME, self.LOCAL_NAME, "images", sample_id)
-        return {Path(p).name: join(img_dir, Path(p).name) for p in paths}
 
     def _load_rows(self):
         # datasets.load_dataset crashes on PyArrow 19 for list<binary> columns;
@@ -1432,17 +1537,15 @@ class MolmoWebSyntheticSkills(MolmoWebSyntheticTrajs):
         for row in tqdm(rows, desc="Loading MolmoWeb-SyntheticSkills"):
             yield row, "default"
 
-    def _select_goal_fallback(self, trajectory: dict) -> str:
-        """Fallback: extract goal from the thought of the first trajectory step.
+    def _select_goal(self, instruction: dict) -> tuple[str, str]:
+        """SyntheticSkills instructions have a single 'goal' key instead of
+        high/mid/low_level keys, so read it directly."""
+        goal = instruction.get("goal", "")
+        return goal, "goal"
 
-        SyntheticSkills HF dataset has empty instruction fields; the goal is
-        recovered from action_output.thought of the first step instead.
-        """
-        for step_idx in sorted(trajectory.keys(), key=int):
-            thought = trajectory[step_idx].get("action", {}).get("action_output", {}).get("thought", "")
-            if thought:
-                return thought
-        return ""
+    def _select_goal_fallback(self, trajectory: dict) -> str:
+        """Override to recover a goal when the instruction field is empty."""
+        raise ValueError("_select_goal returned no goal and no fallback is defined")
 
 
 class MolmoWebHumanSkills(MolmoWebHumanTrajs):
@@ -1450,7 +1553,6 @@ class MolmoWebHumanSkills(MolmoWebHumanTrajs):
     Human-annotated atomic skills dataset.
     Downloads data directly from HuggingFace: allenai/MolmoWeb-HumanSkills.
 
-    Corresponds to the old snorkel_0312_STEPS_with_gemini_thoughts__goal__... dataset.
     HF instruction has high_level, mid_level, low_level, steps.
     """
 
@@ -1467,21 +1569,16 @@ class MolmoWebHumanSkills(MolmoWebHumanTrajs):
 
     @classmethod
     def download(cls, n_procs=None):
-        _load_hf_dataset(cls.HF_SOURCE, cls.HF_SPLIT, cls.LOCAL_NAME)
+        logging.info(f"Downloading {cls.LOCAL_NAME} from {cls.HF_SOURCE}...")
+        _load_hf_dataset(cls.HF_SOURCE, cls.HF_SPLIT, cls.LOCAL_NAME, drop_columns=["images"])
         img_dir = join(WEB_DATA_HOME, cls.LOCAL_NAME, "images")
         if not exists(img_dir):
+            logging.info(f"Saving trajectory images for {cls.LOCAL_NAME} to {img_dir}...")
             rows = list(_iter_polars_parquet(cls.HF_SOURCE, cls.HF_SPLIT, cls.HF_SHARDS))
             _save_traj_images_to_disk(rows, img_dir)
-
-    def _build_image_index(self, row: dict) -> dict:
-        """Return a dict mapping screenshot filename → absolute file path on disk."""
-        sample_id = row["sample_id"]
-        raw_images = row.get("images") or []
-        paths = row.get("image_paths") or []
-        if not paths:
-            paths = [f"screenshot_{i:03d}.png" for i in range(len(raw_images))]
-        img_dir = join(WEB_DATA_HOME, self.LOCAL_NAME, "images", sample_id)
-        return {Path(p).name: join(img_dir, Path(p).name) for p in paths}
+            logging.info(f"Trajectory images for {cls.LOCAL_NAME} saved to {img_dir}.")
+        else:
+            logging.info(f"Trajectory images for {cls.LOCAL_NAME} already exist at {img_dir}, skipping.")
 
     def _load_rows(self):
         # datasets.load_dataset crashes on PyArrow 19 for list<binary> columns;
@@ -1504,10 +1601,10 @@ if __name__ == "__main__":
     new_dataset_names = [
         # "molmoweb_synthetic_ground__template",
         # "molmoweb_synthetic_ground__gpt",
-        # "molmoweb_screenshot_qa",
-        # "molmoweb_synthetic_trajs",
-        # "molmoweb_human_trajs",
-        # "molmoweb_synthetic_skills",
+        # # "molmoweb_screenshot_qa",
+        "molmoweb_synthetic_trajs",
+        "molmoweb_human_trajs",
+        "molmoweb_synthetic_skills",
         # "molmoweb_human_skills",
         # "molmoweb_synthetic_trajs__from_template",
         # "molmoweb_synthetic_trajs__task_seeded_wv",
@@ -1515,10 +1612,10 @@ if __name__ == "__main__":
         # "molmoweb_synthetic_trajs__multi_agent",
         # "molmoweb_synthetic_trajs__node_traversal",
         # "pixmo_points_single_web",
-        "screenspot",
-        "screenspot_v2"
+        # "screenspot",
+        # "screenspot_v2"
     ]
-    split = "test"
+    split = "train"
     import time
     # for old, new in zip(old_dataset_names, new_dataset_names):
     # track the loading time of each dataset

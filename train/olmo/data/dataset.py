@@ -21,8 +21,8 @@ PUBLIC_VIDEO_BASE_URL = "https://storage.googleapis.com/video-olmo-eval"
 if "WEBOLMO_DATA_DIR" in os.environ:
     WEB_DATA_HOME = os.environ["WEBOLMO_DATA_DIR"]
 else:
-    warnings.warn("WEBOLMO_DATA_DIR is not set, using default: /weka/oe-training-default/webolmo/datasets")
-    WEB_DATA_HOME = "/weka/oe-training-default/webolmo/datasets"
+    warnings.warn("WEBOLMO_DATA_DIR is not set, data loading might fail")
+    WEB_DATA_HOME = os.environ.get('WEB_DATA_HOME', "")
 
 
 PUBLIC_VIDEO_BASE_URL = "https://storage.googleapis.com/video-olmo-eval"

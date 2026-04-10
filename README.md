@@ -31,6 +31,7 @@
 - [Training](#training)
   - [Setup](#setup)
   - [Downloading Data](#downloading-data)
+  - [Visualizing Data](#visualizing-data)
   - [Downloading Pretrained Checkpoints](#downloading-pretrained-checkpoints)
   - [SFT Training](#sft-training)
 - [Grounding Evaluation](#grounding-evaluation)
@@ -356,16 +357,19 @@ cd train
 uv sync
 ```
 
-### Downloading Data
-
-MolmoWeb training data is hosted on HuggingFace under the [MolmoWeb Data collection](https://huggingface.co/collections/allenai/molmoweb-data). Set `WEBOLMO_DATA_DIR` to where you want the data stored:
+Set the following environment variables (used by training, eval, and data scripts):
 
 ```bash
-export WEBOLMO_DATA_DIR=/path/to/datasets
-bash scripts/download_datasets.sh
+export WEBOLMO_DATA_DIR=/path/to/datasets   # MolmoWeb training data
 ```
 
-This downloads the following datasets:
+### Downloading Data
+
+MolmoWeb training data is hosted on HuggingFace under the [MolmoWeb Data collection](https://huggingface.co/collections/allenai/molmoweb-data). With `WEBOLMO_DATA_DIR` set, download all datasets with:
+
+```bash
+uv run python olmo/data/download_datasets.py
+```
 
 | Dataset | HuggingFace Repo | Description |
 |---|---|---|
@@ -376,7 +380,34 @@ This downloads the following datasets:
 | SyntheticSkills | `allenai/MolmoWeb-SyntheticSkills` | Synthetic atomic skill demonstrations |
 | HumanSkills | `allenai/MolmoWeb-HumanSkills` | Human atomic skill demonstrations |
 
-Training also uses image pointing data from [Molmo/PixMo](https://huggingface.co/collections/allenai/pixmo-674563dc2e11d2f68e4a4901). Set `DATA_DIR` / `MOLMO_DATA_DIR` to where those are stored (default to the same `WEBOLMO_DATA_DIR`).
+### Visualizing Data
+
+To inspect dataset examples as an HTML file, run `dataset_visualize.py` from inside the `train/` directory:
+
+```bash
+uv run python dataset_visualize.py <task> <output_dir>
+```
+
+For example, to visualize 50 shuffled training examples from `molmoweb_synthetic_trajs`:
+
+```bash
+uv run python dataset_visualize.py molmoweb_synthetic_trajs ./viz --split train --num_examples 50 --shuffle
+```
+
+This saves `./viz/molmoweb_synthetic_trajs.html` with rendered examples (images, tokenized text, and ground-truth annotations).
+
+Key arguments:
+
+| Argument | Default | Description |
+|---|---|---|
+| `task` | *(required)* | Dataset/task name (e.g. `screenspot`, `webclick`, `groundui_1k`) |
+| `output_dir` | *(required)* | Directory to write the HTML file |
+| `--split` | `train` | Dataset split (`train` or `test`) |
+| `--num_examples` | `100` | Number of examples to render |
+| `--shuffle` | `false` | Shuffle examples before selecting |
+| `--show_patches` | `false` | Visualize patch features interleaved with text |
+| `--show_crops` | `false` | Show image crops used by the preprocessor |
+| `--eval` | `false` | Use eval-mode preprocessing (excludes responses) |
 
 ### Downloading Pretrained Checkpoints
 
@@ -414,6 +445,16 @@ bash run_train.sh
 | `DURATION` | `500` | Number of training steps |
 | `SAVE_INTERVAL` | `100` | Checkpoint save frequency (steps) |
 
+To launch a debug run directly:
+
+```bash
+torchrun -m --nproc-per-node 1 \
+  launch_scripts.train debug debug \
+  --save_folder=dbg \
+  --device_batch_size 1 \
+  --duration 10 \
+  --global_batch_size 2
+```
 ---
 
 ## Grounding Evaluation
