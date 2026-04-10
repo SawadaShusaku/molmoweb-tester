@@ -949,21 +949,34 @@ class MolmoWebSyntheticTrajs(DatasetBase):
                 drop_columns=["images"],
             )
         img_dir = join(WEB_DATA_HOME, cls.LOCAL_NAME, "images")
-        if not exists(img_dir):
-            logging.info(f"Saving trajectory images for {cls.LOCAL_NAME} to {img_dir}...")
+        configs_needing_images = []
+        for config in cls.HF_CONFIGS:
+            config_ds_dir = join(WEB_DATA_HOME, cls.LOCAL_NAME, config)
+            if not exists(config_ds_dir):
+                continue
+            import datasets as _datasets
+            config_ds = _datasets.load_from_disk(config_ds_dir)
+            if len(config_ds) == 0:
+                continue
+            sample_id = config_ds[0]["sample_id"]
+            if exists(join(img_dir, sample_id)):
+                logging.info(f"Images for {cls.LOCAL_NAME}/{config} already exist, skipping.")
+            else:
+                logging.info(f"Images for {cls.LOCAL_NAME}/{config} are missing, will download.")
+                configs_needing_images.append(config)
+        if configs_needing_images:
             from huggingface_hub import list_repo_files
             all_files = list(list_repo_files(cls.HF_SOURCE, repo_type="dataset"))
-            shards = sorted(
-                f for f in all_files
-                if f.endswith(".parquet")
-                and any(f.startswith(f"data/{config}-") for config in cls.HF_CONFIGS)
-            )
-            logging.info(f"Found {len(shards)} parquet shards for {cls.LOCAL_NAME}.")
-            rows = list(_iter_polars_parquet(cls.HF_SOURCE, cls.HF_SPLIT, hf_shards=shards))
-            _save_traj_images_to_disk(rows, img_dir)
-            logging.info(f"Trajectory images for {cls.LOCAL_NAME} saved to {img_dir}.")
-        else:
-            logging.info(f"Trajectory images for {cls.LOCAL_NAME} already exist at {img_dir}, skipping.")
+            for config in configs_needing_images:
+                logging.info(f"Saving trajectory images for {cls.LOCAL_NAME}/{config} to {img_dir}...")
+                shards = sorted(
+                    f for f in all_files
+                    if f.endswith(".parquet") and f.startswith(f"data/{config}-")
+                )
+                logging.info(f"Found {len(shards)} parquet shards for {cls.LOCAL_NAME}/{config}.")
+                rows = list(_iter_polars_parquet(cls.HF_SOURCE, cls.HF_SPLIT, hf_shards=shards))
+                _save_traj_images_to_disk(rows, img_dir)
+                logging.info(f"Trajectory images for {cls.LOCAL_NAME}/{config} saved to {img_dir}.")
 
     def __init__(
         self,
@@ -1296,7 +1309,6 @@ class MolmoWebSyntheticTrajs(DatasetBase):
         print(f"Loading {self.LOCAL_NAME} with {self.n_procs} process(es)...")
 
         _synthetic_traj_rows = list(self._load_rows())
-
         result_map: dict[int, list] = {}
         if self.n_procs > 1:
             with mp.get_context("fork").Pool(
@@ -1586,26 +1598,4 @@ class MolmoWebHumanSkills(MolmoWebHumanTrajs):
         rows = list(_iter_polars_parquet(self.HF_SOURCE, self.HF_SPLIT, self.HF_SHARDS))
         for row in tqdm(rows, desc="Loading MolmoWeb-HumanSkills"):
             if row["sample_id"] not in self.BLACKLIST_IDS:
-                yield row, "default"
-
-
-if __name__ == "__main__":
-    from olmo.data.get_dataset import get_dataset_by_name
-    dataset_names = [
-        "molmoweb_synthetic_ground__template",
-        "molmoweb_synthetic_ground__gpt",
-        "molmoweb_screenshot_qa",
-        "molmoweb_synthetic_trajs",
-        "molmoweb_human_trajs",
-        "molmoweb_synthetic_skills",
-        "molmoweb_human_skills",
-        "pixmo_points_single_web",
-        "screenspot",
-        "screenspot_v2"
-    ]
-    split = "train"
-    for ds in dataset_names:
-        ds = get_dataset_by_name(new, split=split)
-        print(f"Loaded {ds} with {len(ds)} examples.")
-        ex = ds[0]
-        print(f"New example: {ex}")
+                yield row, "default"      

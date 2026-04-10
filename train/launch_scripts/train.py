@@ -197,7 +197,7 @@ if __name__ == "__main__":
             [
                 "gemini_ma",
                 [
-                    "molmoweb_synthetic_trajs__multi_agent__goal",
+                    "molmoweb_synthetic_trajs__multi_agent",
                 ],
                 0.18,
             ],
