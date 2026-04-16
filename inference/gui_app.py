@@ -573,10 +573,7 @@ def _render_page(lang: str = "en") -> HTMLResponse:
       font-family: "Avenir Next", "Hiragino Sans", "Yu Gothic", sans-serif;
       color: var(--ink);
       font-size: 18px;
-      background:
-        radial-gradient(circle at top left, #fff6d8 0, transparent 35%),
-        radial-gradient(circle at top right, #dceff5 0, transparent 28%),
-        linear-gradient(180deg, #faf7f0 0%, var(--bg) 100%);
+      background: linear-gradient(180deg, #faf7f0 0%, var(--bg) 100%);
     }}
     main {{
       width: min(1600px, calc(100vw - 32px));
@@ -989,7 +986,7 @@ def _render_page(lang: str = "en") -> HTMLResponse:
       background: var(--accent);
     }}
     .progress-seg.active {{
-      background: var(--accent);
+      background: color-mix(in srgb, var(--accent) 70%, #4ade80);
       animation: seg-pulse 1.2s ease-in-out infinite;
     }}
     .progress-seg.active::after {{
