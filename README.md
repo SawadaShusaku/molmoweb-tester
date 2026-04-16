@@ -1,207 +1,81 @@
-# MolmoWeb Tester
+<p align="center">
+  <img src="assets/logo.png" alt="MolmoWeb Tester" width="100%">
+</p>
 
-MolmoWeb Tester is a small local GUI for testing [MolmoWeb](https://github.com/allenai/molmoweb) with a browser-based control panel.
+<p align="center">
+  A local testing GUI for MolmoWeb on macOS
+</p>
 
-This project is currently tailored for macOS, especially Apple Silicon Macs. The model server has been adjusted to work with `mps` first and fall back to CPU when needed. Windows support is possible later, but this repository should be treated as macOS-first for now.
+<p align="center">
+  <a href="docs/README.en.md">English Guide</a> &nbsp;|&nbsp;
+  <a href="docs/README.ja.md">日本語ガイド</a> &nbsp;|&nbsp;
+  <a href="https://github.com/allenai/molmoweb">Upstream MolmoWeb</a>
+</p>
 
-## English
+---
 
-### What This Project Does
+**MolmoWeb Tester** is a local control panel for [MolmoWeb](https://github.com/allenai/molmoweb). It adds a browser-based GUI on top of the model server so you can send tasks, watch the current run, inspect execution steps, and review history from your own machine.
 
-- Starts the MolmoWeb model server on your local machine
-- Adds a local browser GUI for sending natural-language tasks
-- Shows the current run status, current step, and execution trace
-- Stores run history locally so you can reopen previous results
-- Lets you reset the browser session without restarting the whole app
+This repository is currently focused on **macOS**, especially **Apple Silicon Macs**. The model server has been adjusted to prefer `mps` and fall back to CPU when needed.
 
-### Current Scope
+## Preview
+
+<p align="center">
+  <img src="assets/gui-screenshot.png" alt="MolmoWeb Tester UI" width="100%">
+</p>
+
+## Highlights
+
+- Local GUI for testing MolmoWeb from the browser
+- Live run panel with current action, URL, and step progress
+- Execution step viewer with per-step screenshots
+- Persistent run history with delete / clear actions
+- Japanese / English language switcher
+- Adjustable Chromium window size
+- macOS-friendly model server fallback: `cuda -> mps -> cpu`
+
+## Quick Start
+
+```bash
+cd molmoweb
+uv sync
+uv run playwright install chromium
+
+export PREDICTOR_TYPE=hf
+bash scripts/start_server.sh ./checkpoints/MolmoWeb-8B
+```
+
+In another terminal:
+
+```bash
+cd molmoweb
+bash scripts/start_gui.sh 8010
+```
+
+Open:
+
+```text
+http://127.0.0.1:8010/?lang=ja
+```
+
+## Documentation
+
+- [English Guide](docs/README.en.md)
+- [日本語ガイド](docs/README.ja.md)
+
+## Current Scope
 
 - OS: macOS
 - Recommended hardware: Apple Silicon Mac
-- Model: tested with `MolmoWeb-8B`
 - Browser control: Playwright-managed Chromium
-- UI language: Japanese / English switcher
+- Tested model: `MolmoWeb-8B`
 
-This is not a hosted web product. It is a local tester that opens:
+## Notes
 
-- a model server at `http://127.0.0.1:8001`
-- a local GUI at `http://127.0.0.1:8010`
+- This GUI controls a separate Chromium window. It does not take over your existing Safari or Brave session.
+- Some advanced interactions, especially right-click and tab workflows, still have room for improvement.
+- Local history is stored under `inference/htmls/gui/`.
 
-### Repository Layout
+## Acknowledgements
 
-- `agent/`
-  Model server and backend selection
-- `inference/client.py`
-  MolmoWeb client with local browser session support
-- `inference/gui_app.py`
-  Local FastAPI GUI for testing MolmoWeb
-- `scripts/start_server.sh`
-  Starts the model server
-- `scripts/start_gui.sh`
-  Starts the tester GUI
-
-### Requirements
-
-- macOS
-- Python 3.10+
-- `uv`
-- Playwright Chromium dependencies
-- MolmoWeb checkpoint access
-
-Install dependencies:
-
-```bash
-uv sync
-uv run playwright install chromium
-```
-
-### Quick Start
-
-1. Start the model server:
-
-```bash
-cd /path/to/molmoweb
-export PREDICTOR_TYPE=hf
-bash scripts/start_server.sh ./checkpoints/MolmoWeb-8B
-```
-
-2. Start the GUI in another terminal:
-
-```bash
-cd /path/to/molmoweb
-bash scripts/start_gui.sh 8010
-```
-
-3. Open:
-
-```text
-http://127.0.0.1:8010/?lang=ja
-```
-
-### How To Use The GUI
-
-- Enter a task in the textarea
-- Set the maximum step count
-- Set browser window width and height
-- Click `Run task`
-- Watch the current run and execution steps on the right
-- Open `History` to review previous runs
-- Click `Reset browser session` if you want a fresh Chromium session
-
-### Notes
-
-- Chromium is controlled in a separate window
-- The tester does not control your existing Safari or Brave session
-- Right-click and some advanced browser behaviors may still be imperfect
-- Run history is saved locally in `inference/htmls/gui/history.json`
-
-### Roadmap
-
-- Better Windows support
-- Better right-click and tab handling
-- Stronger task progress feedback
-- Optional live screenshot panel
-
-## 日本語
-
-### このプロジェクトについて
-
-MolmoWeb Tester は、MolmoWeb をローカル環境で試すための簡易 GUI です。自然言語のタスクを入力すると、MolmoWeb が別ウィンドウの Chromium を操作し、その実行状況をブラウザ上から確認できます。
-
-このリポジトリは現時点では macOS 向けです。特に Apple Silicon Mac を前提に調整しており、モデルサーバーは `mps` を優先し、使えない場合は CPU にフォールバックします。Windows 対応は今後の拡張候補です。
-
-### できること
-
-- ローカルで MolmoWeb のモデルサーバーを起動
-- ブラウザ GUI からタスクを送信
-- 現在の実行状況とステップを確認
-- 実行履歴をローカルに保存
-- ブラウザセッションだけを個別にリセット
-- 日本語 / 英語を切り替え
-
-### 現在の前提
-
-- 対応 OS: macOS
-- 推奨環境: Apple Silicon Mac
-- 動作確認モデル: `MolmoWeb-8B`
-- ブラウザ操作: Playwright 管理下の Chromium
-
-このプロジェクトはクラウドサービスではなく、ローカルで次の 2 つを起動して使います。
-
-- モデルサーバー: `http://127.0.0.1:8001`
-- GUI: `http://127.0.0.1:8010`
-
-### 主なファイル
-
-- `agent/`
-  モデルサーバーとバックエンド切り替え
-- `inference/client.py`
-  ローカルブラウザセッション付きの MolmoWeb クライアント
-- `inference/gui_app.py`
-  MolmoWeb Tester の GUI 本体
-- `scripts/start_server.sh`
-  モデルサーバー起動用スクリプト
-- `scripts/start_gui.sh`
-  GUI 起動用スクリプト
-
-### 必要なもの
-
-- macOS
-- Python 3.10 以上
-- `uv`
-- Playwright の Chromium
-- MolmoWeb のチェックポイント
-
-セットアップ:
-
-```bash
-uv sync
-uv run playwright install chromium
-```
-
-### 起動手順
-
-1. モデルサーバーを起動:
-
-```bash
-cd /path/to/molmoweb
-export PREDICTOR_TYPE=hf
-bash scripts/start_server.sh ./checkpoints/MolmoWeb-8B
-```
-
-2. 別ターミナルで GUI を起動:
-
-```bash
-cd /path/to/molmoweb
-bash scripts/start_gui.sh 8010
-```
-
-3. ブラウザで開く:
-
-```text
-http://127.0.0.1:8010/?lang=ja
-```
-
-### GUI の使い方
-
-- テキスト欄にタスクを入力
-- 最大ステップ数を設定
-- Chromium の横幅と高さを設定
-- `タスクを実行` を押す
-- 右側で現在の実行状況と実行ステップを確認
-- `履歴` から過去の結果を確認
-- 新しい Chromium セッションにしたいときは `セッションをリセット` を押す
-
-### 注意点
-
-- Chromium は別ウィンドウで開きます
-- 既存の Safari や Brave のセッションは操作しません
-- 右クリックや新しいタブ関連の挙動はまだ改善余地があります
-- 履歴は `inference/htmls/gui/history.json` にローカル保存されます
-
-### 今後の改善候補
-
-- Windows 対応
-- 右クリックとタブ操作の改善
-- 進行状況 UI の強化
-- ライブスクリーンショット表示
+This project is based on [allenai/molmoweb](https://github.com/allenai/molmoweb), with additional work for macOS compatibility and a local tester GUI.
