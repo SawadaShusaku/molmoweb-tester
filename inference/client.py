@@ -3,6 +3,8 @@ MolmoWeb client for inference.
 """
 
 import asyncio
+import base64
+import io
 import os
 import re
 import numpy as np
@@ -11,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
@@ -72,12 +75,18 @@ class MolmoWeb:
         keep_alive: bool = True,
         headless: bool = True,
         verbose: bool = True,
+        step_callback: Callable[[dict], None] | None = None,
+        viewport_width: int | None = None,
+        viewport_height: int | None = None,
     ):
         self.endpoint = endpoint or os.environ.get("MOLMOWEB_ENDPOINT")
         self.local = local
         self.keep_alive = keep_alive
         self.headless = headless
         self.verbose = verbose
+        self.step_callback = step_callback
+        self.viewport_width = viewport_width or self.VIEWPORT_WIDTH
+        self.viewport_height = viewport_height or self.VIEWPORT_HEIGHT
         self.agent = self._create_agent() if self.endpoint else None
         self.env = None
         self.last_obs = None
@@ -111,8 +120,8 @@ class MolmoWeb:
             return SimpleEnv(
                 start_url=start_url,
                 goal="",
-                viewport_width=self.VIEWPORT_WIDTH,
-                viewport_height=self.VIEWPORT_HEIGHT,
+                viewport_width=self.viewport_width,
+                viewport_height=self.viewport_height,
                 extract_axtree=False,
                 headless=self.headless,
             )
@@ -123,8 +132,8 @@ class MolmoWeb:
         return BrowserbaseEnv(
             start_url=start_url,
             goal="",
-            viewport_width=self.VIEWPORT_WIDTH,
-            viewport_height=self.VIEWPORT_HEIGHT,
+            viewport_width=self.viewport_width,
+            viewport_height=self.viewport_height,
             extract_axtree=False,
         )
 
@@ -154,9 +163,9 @@ class MolmoWeb:
 
     def _run_one(self, obs: dict, query: str) -> tuple[dict | None, Step]:
         h, w = obs["screenshot"].shape[:2]
-        if (w, h) != (self.VIEWPORT_WIDTH, self.VIEWPORT_HEIGHT):
+        if (w, h) != (self.viewport_width, self.viewport_height):
             img = Image.fromarray(obs["screenshot"]).resize(
-                (self.VIEWPORT_WIDTH, self.VIEWPORT_HEIGHT), Image.LANCZOS,
+                (self.viewport_width, self.viewport_height), Image.LANCZOS,
             )
             obs["screenshot"] = np.array(img)
         state = self._get_state(obs)
@@ -180,6 +189,21 @@ class MolmoWeb:
         for step_num in range(1, max_steps + 1):
             next_obs, step = self._run_one(curr_obs, query)
             traj.steps.append(step)
+            if self.step_callback is not None:
+                screenshot_base64 = None
+                if step.state is not None:
+                    buf = io.BytesIO()
+                    step.state.img.save(buf, format="PNG")
+                    screenshot_base64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                self.step_callback({
+                    "step_num": step_num,
+                    "max_steps": max_steps,
+                    "error": step.error,
+                    "action": str(step.prediction.action) if step.prediction else None,
+                    "page_url": step.state.page_url if step.state else None,
+                    "page_title": step.state.page_title if step.state else None,
+                    "screenshot_base64": screenshot_base64,
+                })
 
             if step.error is not None:
                 if self.verbose:

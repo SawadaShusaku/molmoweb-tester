@@ -15,6 +15,18 @@ from PIL import Image
 log = logging.getLogger(__name__)
 
 
+def resolve_torch_device(device: str | None = None) -> str:
+    import torch
+
+    if device:
+        return device
+    if torch.cuda.is_available():
+        return "cuda:0"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 # ---------------------------------------------------------------------------
 # FastAPI (remote HTTP endpoint)
 # ---------------------------------------------------------------------------
@@ -97,16 +109,17 @@ class HFActionPredictor:
         import torch
         from transformers import AutoProcessor, AutoModelForImageTextToText
 
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = resolve_torch_device(device)
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p
 
         self.processor = AutoProcessor.from_pretrained(checkpoint, trust_remote_code=True, padding_side="left")
+        dtype = torch.float16 if self.device.startswith(("cuda", "mps")) else torch.float32
         self.model = AutoModelForImageTextToText.from_pretrained(
             checkpoint,
             trust_remote_code=True,
-            torch_dtype=torch.float32,
+            torch_dtype=dtype,
             attn_implementation="sdpa",
         ).to(self.device)
         self.model.eval()
@@ -166,7 +179,7 @@ class NativeActionPredictor:
         from olmo.train.checkpointer import load_model_state
         from olmo.util import resource_path
 
-        self.device = device or "cuda:0"
+        self.device = resolve_torch_device(device)
         self.max_new_tokens = max_new_tokens
         self.temperature = temperature
         self.top_p = top_p

@@ -23,6 +23,21 @@ TEMPERATURE = float(os.environ.get("TEMPERATURE", "0.7"))
 TOP_P = float(os.environ.get("TOP_P", "0.8"))
 
 
+def get_available_devices(num_predictors: int) -> list[str]:
+    if torch.cuda.is_available():
+        count = torch.cuda.device_count()
+        return [f"cuda:{i}" for i in range(min(num_predictors, count))]
+
+    if torch.backends.mps.is_available():
+        if num_predictors > 1:
+            print("MPS backend detected; forcing NUM_PREDICTORS=1")
+        return ["mps"]
+
+    if num_predictors > 1:
+        print("CPU fallback detected; forcing NUM_PREDICTORS=1")
+    return ["cpu"]
+
+
 def create_predictor_pool(
     ckpt: str,
     num_predictors: int = 1,
@@ -31,13 +46,14 @@ def create_predictor_pool(
     temperature: float = 0.7,
     top_p: float = 0.8,
 ) -> queue.Queue:
-    pool: queue.Queue = queue.Queue(maxsize=num_predictors)
+    devices = get_available_devices(num_predictors)
+    pool: queue.Queue = queue.Queue(maxsize=len(devices))
 
     print(f"Using checkpoint: {ckpt}")
-    print(f"GPUs: {torch.cuda.device_count()}, predictors: {num_predictors}, type: {predictor_type}")
+    print(f"CUDA GPUs: {torch.cuda.device_count()}, predictors: {len(devices)}, type: {predictor_type}")
+    print(f"Devices: {', '.join(devices)}")
 
-    for i in range(num_predictors):
-        device = f"cuda:{i}"
+    for device in devices:
 
         if predictor_type == "hf":
             predictor = HFActionPredictor(checkpoint=ckpt, device=device)

@@ -225,5 +225,11 @@ checkpoints/
 # Extension UI (manifest side_panel / offscreen); do not ignore alongside generic *.html above
 !annotation/molmoweb_extension/**/*.html
 
+# MolmoWeb Tester local artifacts
+inference/htmls/gui/
+!inference/htmls/gui/.gitkeep
+inference/htmls/trajectory*.html
+.venv.lock
+
 *debug*
 datasets/
