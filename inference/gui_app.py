@@ -97,8 +97,16 @@ TEXT = {
         "help_heading": "使い方",
         "help_steps": [
             ("1.", "タスクを入力", "ブラウザにやらせたい操作を書きます。"),
-            ("2.", "設定を調整", "必要に応じてステップ数やウィンドウサイズを変更します。"),
-            ("3.", "実行", "「タスクを実行」を押すと、右側にリアルタイムで進捗が表示されます。"),
+            (
+                "2.",
+                "設定を調整",
+                "必要に応じてステップ数やウィンドウサイズを変更します。",
+            ),
+            (
+                "3.",
+                "実行",
+                "「タスクを実行」を押すと、右側にリアルタイムで進捗が表示されます。",
+            ),
             ("4.", "結果を確認", "過去の実行結果は「履歴」パネルから確認できます。"),
         ],
         "help_note": "モデルサーバーを起動したままにしてください :",
@@ -257,7 +265,10 @@ class AppState:
                     "page_url": event.get("page_url") or "",
                     "page_title": event.get("page_title") or "",
                 }
-                if not self.live_run.steps_log or self.live_run.steps_log[-1]["summary"] != item["summary"]:
+                if (
+                    not self.live_run.steps_log
+                    or self.live_run.steps_log[-1]["summary"] != item["summary"]
+                ):
                     self.live_run.steps_log.append(item)
             if self.live_run.running:
                 self.live_run.status = "running"
@@ -288,14 +299,20 @@ def _load_history() -> list[RunRecord]:
 
 def _save_history() -> None:
     HISTORY_PATH.write_text(
-        json.dumps([asdict(record) for record in STATE.history], ensure_ascii=False, indent=2)
+        json.dumps(
+            [asdict(record) for record in STATE.history], ensure_ascii=False, indent=2
+        )
     )
 
 
 STATE = AppState()
 STATE.history = _load_history()
 app = FastAPI(title="MolmoWeb GUI")
-app.mount("/artifacts", StaticFiles(directory=str(ROOT_DIR / "inference" / "htmls")), name="artifacts")
+app.mount(
+    "/artifacts",
+    StaticFiles(directory=str(ROOT_DIR / "inference" / "htmls")),
+    name="artifacts",
+)
 app.mount("/assets", StaticFiles(directory=str(ROOT_DIR / "assets")), name="assets")
 
 
@@ -321,7 +338,9 @@ def _extract_answer(traj: Trajectory) -> tuple[str, str]:
 
 
 def _save_trajectory(traj: Trajectory, prompt: str) -> str:
-    slug = "".join(ch if ch.isalnum() else "_" for ch in prompt).strip("_")[:40] or "task"
+    slug = (
+        "".join(ch if ch.isalnum() else "_" for ch in prompt).strip("_")[:40] or "task"
+    )
     filename = f"{datetime.now():%Y%m%d_%H%M%S}_{slug}_{uuid4().hex[:8]}.html"
     output_path = HTML_DIR / filename
     traj.save_html(output_path=str(output_path), query=prompt)
@@ -337,7 +356,11 @@ def _truncate_text(text: str | None, max_chars: int = 140) -> str:
 
 
 def _render_record(record: RunRecord, lang: str) -> str:
-    status = _t(lang, record.status) if record.status in {"completed", "answered", "incomplete", "stopped"} else record.status
+    status = (
+        _t(lang, record.status)
+        if record.status in {"completed", "answered", "incomplete", "stopped"}
+        else record.status
+    )
     detail_bits = [
         f"{escape(_t(lang, 'steps'))}: {record.step_count}",
         f"max_steps: {record.max_steps}",
@@ -350,7 +373,11 @@ def _render_record(record: RunRecord, lang: str) -> str:
         detail_bits.append(
             f'<a href="{escape(record.trajectory_href)}" target="_blank" rel="noreferrer">{escape(_t(lang, "trajectory"))}</a>'
         )
-    error_html = f'<p class="meta-line">{escape(_t(lang, "error"))}: {escape(record.error)}</p>' if record.error else ""
+    error_html = (
+        f'<p class="meta-line">{escape(_t(lang, "error"))}: {escape(record.error)}</p>'
+        if record.error
+        else ""
+    )
     prompt_preview = escape(_truncate_text(record.prompt, 110))
     answer_preview = escape(_truncate_text(record.answer, 150))
     full_prompt = escape(record.prompt)
@@ -363,11 +390,11 @@ def _render_record(record: RunRecord, lang: str) -> str:
           <span>{escape(record.created_at)}</span>
           <span>{escape(status)}</span>
         </div>
-        <button class="delete-btn" type="button" data-record-id="{escape(record.id)}" title="{escape(_t(lang, 'delete'))}">&#x1F5D1;&#xFE0E;</button>
+        <button class="delete-btn" type="button" data-record-id="{escape(record.id)}" title="{escape(_t(lang, "delete"))}">&#x1F5D1;&#xFE0E;</button>
       </div>
       <p class="record-copy"><strong>{escape(_t(lang, "prompt"))}</strong><br><span class="preview">{prompt_preview}</span><span class="full" hidden>{full_prompt}</span></p>
       <p class="answer"><strong>{escape(_t(lang, "answer"))}</strong><br><span class="preview">{answer_preview}</span><span class="full" hidden>{full_answer}</span></p>
-      <p class="meta-line">{' | '.join(detail_bits)}</p>
+      <p class="meta-line">{" | ".join(detail_bits)}</p>
       {error_html}
     </article>
     """
@@ -375,18 +402,23 @@ def _render_record(record: RunRecord, lang: str) -> str:
 
 def _status_payload(lang: str) -> dict:
     live = asdict(STATE.live_run)
-    live["browser_status"] = _t(lang, "ready") if STATE.client is not None else _t(lang, "not_started")
+    live["browser_status"] = (
+        _t(lang, "ready") if STATE.client is not None else _t(lang, "not_started")
+    )
     live["localized_status"] = (
         _t(lang, live["status"])
         if live["status"] in {"completed", "answered", "incomplete", "stopped"}
         else (_t(lang, "running") if live["running"] else _t(lang, "idle"))
     )
-    live["history_html"] = "".join(_render_record(record, lang) for record in reversed(STATE.history)) or (
-        f'<p class="hint">{escape(_t(lang, "no_runs"))}</p>'
+    live["history_html"] = "".join(
+        _render_record(record, lang) for record in reversed(STATE.history)
+    ) or (f'<p class="hint">{escape(_t(lang, "no_runs"))}</p>')
+    live["trace_html"] = (
+        "".join(
+            _render_trace_item(item, idx) for idx, item in enumerate(live["steps_log"])
+        )
+        or f'<p class="hint">{escape(_t(lang, "idle"))}</p>'
     )
-    live["trace_html"] = "".join(
-        _render_trace_item(item, idx) for idx, item in enumerate(live["steps_log"])
-    ) or f'<p class="hint">{escape(_t(lang, "idle"))}</p>'
     live["last_error"] = STATE.last_error
     # Latest step content for the "current step" panel
     steps = live["steps_log"]
@@ -407,9 +439,9 @@ def _render_latest_step(item: dict[str, str]) -> str:
         parts.append(f'<div class="latest-action">{escape(summary)}</div>')
     meta = []
     if item.get("page_title"):
-        meta.append(f'title: {escape(item["page_title"])}')
+        meta.append(f"title: {escape(item['page_title'])}")
     if item.get("page_url"):
-        meta.append(f'url: {escape(item["page_url"])}')
+        meta.append(f"url: {escape(item['page_url'])}")
     if meta:
         parts.append(f'<div class="trace-meta">{" | ".join(meta)}</div>')
     if item.get("screenshot_base64"):
@@ -430,13 +462,13 @@ def _render_trace_item(item: dict[str, str], idx: int = 0) -> str:
         )
     meta = []
     if item.get("page_title"):
-        meta.append(f'title: {escape(item["page_title"])}')
+        meta.append(f"title: {escape(item['page_title'])}")
     if not is_first and item.get("page_url"):
-        meta.append(f'url: {escape(item["page_url"])}')
+        meta.append(f"url: {escape(item['page_url'])}")
     meta_html = f'<div class="trace-meta">{" | ".join(meta)}</div>' if meta else ""
     open_attr = "" if is_first else " open"
     return (
-        f"<details class=\"trace-item\"{open_attr}>"
+        f'<details class="trace-item"{open_attr}>'
         f"<summary>{escape(item.get('summary', ''))}</summary>"
         f"{meta_html}"
         f"{img_html}"
@@ -513,7 +545,9 @@ def _render_page(lang: str = "en") -> HTMLResponse:
     current_step = (
         escape(_t(lang, "queued"))
         if data["running"] and not data["step_num"]
-        else f'{data["step_num"]}/{data["max_steps"]}' if data["step_num"] else "-"
+        else f"{data['step_num']}/{data['max_steps']}"
+        if data["step_num"]
+        else "-"
     )
 
     html = f"""<!doctype html>
@@ -936,9 +970,9 @@ def _render_page(lang: str = "en") -> HTMLResponse:
     }}
     .progress-bar {{
       display: flex;
-      gap: 3px;
+      gap: 4px;
       padding: 0 16px 8px;
-      height: 10px;
+      height: 16px;
     }}
     .progress-bar:empty {{
       display: none;
@@ -955,7 +989,7 @@ def _render_page(lang: str = "en") -> HTMLResponse:
       background: var(--accent);
     }}
     .progress-seg.active {{
-      background: color-mix(in srgb, var(--accent) 70%, #4ade80);
+      background: var(--accent);
       animation: seg-pulse 1.2s ease-in-out infinite;
     }}
     .progress-seg.active::after {{
@@ -1298,8 +1332,8 @@ def _render_page(lang: str = "en") -> HTMLResponse:
           </div>
           <button id="history-toggle" class="secondary" type="button">{escape(_t(lang, "history_toggle"))}</button>
           <nav class="lang-switch" aria-label="Language switcher">
-            <a href="/?lang=ja" class="{'active' if lang == 'ja' else ''}">{escape(_t(lang, "lang_ja"))}</a>
-            <a href="/?lang=en" class="{'active' if lang == 'en' else ''}">{escape(_t(lang, "lang_en"))}</a>
+            <a href="/?lang=ja" class="{"active" if lang == "ja" else ""}">{escape(_t(lang, "lang_ja"))}</a>
+            <a href="/?lang=en" class="{"active" if lang == "en" else ""}">{escape(_t(lang, "lang_en"))}</a>
           </nav>
         </div>
       </div>
@@ -1308,7 +1342,7 @@ def _render_page(lang: str = "en") -> HTMLResponse:
       <div class="panel">
         <div class="meta">
           <div><strong>{escape(_t(lang, "browser_session"))}</strong><span id="browser-status">{escape(data["browser_status"])}</span></div>
-          <div><strong>{escape(_t(lang, "headless"))}</strong>{'true' if STATE.headless else 'false'}</div>
+          <div><strong>{escape(_t(lang, "headless"))}</strong>{"true" if STATE.headless else "false"}</div>
         </div>
         <form id="run-form">
           <input type="hidden" name="lang" value="{lang}">
@@ -1361,12 +1395,14 @@ def _render_page(lang: str = "en") -> HTMLResponse:
         <div class="panel trace-panel">
           <div class="live-head">
             <span>{escape(_t(lang, "live_trace"))}</span>
-            <label class="toggle-switch-inline">
-              <span class="toggle-label">{escape(_t(lang, "expand_all"))}</span>
-              <input type="checkbox" id="trace-toggle" checked>
-              <span class="toggle-slider"></span>
-            </label>
-            <span class="badge" style="margin-left:auto;"><span id="live-step-badge">{current_step}</span></span>
+            <div class="live-head-actions">
+              <label class="toggle-switch-inline">
+                <span class="toggle-label">{escape(_t(lang, "expand_all"))}</span>
+                <input type="checkbox" id="trace-toggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="badge"><span id="live-step-badge">{current_step}</span></span>
+            </div>
           </div>
           <div class="trace-list" id="trace-list">{data["trace_html"]}</div>
         </div>
@@ -1676,7 +1712,9 @@ def api_run(
     width = int(window_width)
     height = int(window_height)
     if width < 640 or height < 480:
-        return JSONResponse({"detail": _t(lang, "window_size_invalid")}, status_code=400)
+        return JSONResponse(
+            {"detail": _t(lang, "window_size_invalid")}, status_code=400
+        )
 
     with STATE.lock:
         if STATE.live_run.running:
