@@ -54,6 +54,9 @@ class LiveRun:
     prompt: str = ""
     max_steps: int = 0
     step_num: int = 0
+    action: str = ""
+    page_url: str = ""
+    page_title: str = ""
     status: str = "idle"
     error: str | None = None
     answer: str = ""
@@ -66,14 +69,16 @@ class LiveRun:
 @dataclass
 class RunRecord:
     id: str
-    created_at: str
     prompt: str
     answer: str
     status: str
-    step_count: int
     max_steps: int
+    created_at: str
+    trajectory_href: str | None = None
+    final_url: str | None = None
+    final_title: str | None = None
+    step_count: int = 0
     error: str | None = None
-    trajectory_href: str = ""
 
 
 class AppState:
@@ -100,6 +105,7 @@ class AppState:
                 viewport_width=self.viewport_width,
                 viewport_height=self.viewport_height,
             )
+            self.client.step_callback = self.update_live_run
         return self.client
 
     def reset_browser(self) -> None:
@@ -125,14 +131,17 @@ class AppState:
     def update_live_run(self, event: dict) -> None:
         with self.lock:
             self.live_run.step_num = event.get("step_num", self.live_run.step_num)
-            self.live_run.status = event.get("status", self.live_run.status)
-            self.live_run.error = event.get("error") or self.live_run.error
-            self.live_run.answer = event.get("answer", self.live_run.answer)
-            self.live_run.prompt = event.get("prompt", self.live_run.prompt)
-            if event.get("screenshot_base64") or event.get("summary"):
+            self.live_run.max_steps = event.get("max_steps", self.live_run.max_steps)
+            self.live_run.action = event.get("action") or ""
+            self.live_run.page_url = event.get("page_url") or ""
+            self.live_run.page_title = event.get("page_title") or ""
+            self.live_run.error = event.get("error")
+            step_num = event.get("step_num")
+            action = event.get("action") or ""
+            if step_num and action:
                 item = {
-                    "summary": event.get("summary", ""),
-                    "screenshot_base64": event.get("screenshot_base64", ""),
+                    "summary": f"{step_num}. {action}",
+                    "screenshot_base64": event.get("screenshot_base64") or "",
                     "page_url": event.get("page_url") or "",
                     "page_title": event.get("page_title") or "",
                 }
@@ -155,8 +164,19 @@ def _load_history() -> list[RunRecord]:
         return []
     try:
         data = json.loads(HISTORY_PATH.read_text())
-        return [RunRecord(**item) for item in data]
-    except (json.JSONDecodeError, TypeError):
+        if not isinstance(data, list):
+            return []
+        records = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            item.setdefault("id", uuid4().hex)
+            item.setdefault("trajectory_href", item.get("trajectory_href") or "")
+            item.setdefault("error", item.get("error"))
+            item.setdefault("step_count", item.get("step_count", 0))
+            records.append(RunRecord(**item))
+        return records
+    except Exception:
         return []
 
 
@@ -183,9 +203,8 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 def _extract_answer(traj: Trajectory) -> tuple[str, str]:
     for step in reversed(traj.steps):
-        for action in reversed(step.actions):
-            if isinstance(action, SendMsgToUser):
-                return action.message, "answered"
+        if step.prediction and isinstance(step.prediction.action, SendMsgToUser):
+            return step.prediction.action.message, "answered"
     if traj.steps and traj.steps[-1].state and traj.steps[-1].state.get("done"):
         return "", "completed"
     return "", "incomplete"
@@ -218,8 +237,11 @@ def _render_record(record: RunRecord, lang: str) -> str:
     detail_bits = [
         f"{escape(_t(lang, 'steps'))}: {record.step_count}",
         f"max_steps: {record.max_steps}",
-        f"{escape(_t(lang, 'started'))}: {record.created_at}",
     ]
+    if record.final_title:
+        detail_bits.append(f"title: {escape(record.final_title)}")
+    if record.final_url:
+        detail_bits.append(f"url: {escape(record.final_url)}")
     if record.trajectory_href:
         detail_bits.append(
             f'<a href="{escape(record.trajectory_href)}" target="_blank" rel="noreferrer">{escape(_t(lang, "trajectory"))}</a>'
@@ -336,14 +358,16 @@ def _finalize_run(prompt: str, max_steps: int, traj: Trajectory) -> None:
     with STATE.lock:
         record = RunRecord(
             id=uuid4().hex[:12],
-            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             prompt=prompt,
             answer=answer,
             status=status,
-            step_count=len(traj.steps),
             max_steps=max_steps,
-            error=error,
+            created_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             trajectory_href=href,
+            final_url=last_state.page_url if last_state else None,
+            final_title=last_state.page_title if last_state else None,
+            step_count=len(traj.steps),
+            error=error,
         )
         STATE.history.append(record)
         _save_history()

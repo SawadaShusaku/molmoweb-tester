@@ -62,11 +62,11 @@ h1 {
 }
 
 .version-suffix {
-  font-size: 0.45em;
+  font-size: 0.47em;
   font-weight: 500;
   color: #3a4550;
-  margin-left: 1.4em;
-  letter-spacing: 0.05em;
+  margin-left: 1.2em;
+  letter-spacing: 0.03em;
   vertical-align: baseline;
 }
 

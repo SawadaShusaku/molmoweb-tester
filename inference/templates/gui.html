@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="{{ lang }}">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MolmoWeb GUI</title>
+  <link rel="stylesheet" href="/static/css/gui.css">
+</head>
+
+<body>
+  <main>
+    <section class="hero">
+      <div class="hero-top">
+        <div class="brand">
+          <img class="brand-mark" src="/assets/logo-mark.png" alt="MolmoWeb icon">
+          <h1>{{ title }}<span class="version-suffix">{{ version_suffix }}</span></h1>
+        </div>
+        <div class="top-actions">
+          <div class="help-wrap">
+            <button id="help-toggle" class="secondary help-button" type="button">{{ help_button }}</button>
+            <div id="help-popover" class="help-popover">
+              <h3 class="help-heading">{{ help_heading }}</h3>
+              <dl class="help-steps">
+                {% for num, step_title, desc in help_steps %}
+                <div class="help-step">
+                  <dt><span class="step-num">{{ num }}</span> {{ step_title }}</dt>
+                  <dd>{{ desc }}</dd>
+                </div>
+                {% endfor %}
+              </dl>
+              <p class="help-note">{{ help_note }} <code>{{ endpoint }}</code></p>
+            </div>
+          </div>
+          <button id="history-toggle" class="secondary" type="button">{{ history_toggle }}</button>
+          <nav class="lang-switch" aria-label="Language switcher">
+            <a href="/?lang=ja" class="{{ 'active' if lang == 'ja' else '' }}">{{ lang_ja }}</a>
+            <a href="/?lang=en" class="{{ 'active' if lang == 'en' else '' }}">{{ lang_en }}</a>
+          </nav>
+        </div>
+      </div>
+    </section>
+    <section class="grid">
+      <div class="panel">
+        <div class="meta">
+          <div><strong>{{ browser_session_label }}</strong><span id="browser-status">{{ data.browser_status }}</span>
+          </div>
+          <div><strong>{{ headless_label }}</strong>{{ "true" if headless else "false" }}</div>
+        </div>
+        <form id="run-form">
+          <input type="hidden" name="lang" value="{{ lang }}">
+          <label for="prompt">{{ task_label }}</label>
+          <textarea id="prompt" name="prompt" placeholder="{{ task_placeholder }}"></textarea>
+          <div class="field-grid">
+            <div class="field-group">
+              <label for="max_steps">{{ max_steps_label }}</label>
+              <input id="max_steps" name="max_steps" type="number" min="1" max="50" value="{{ max_steps_default }}">
+            </div>
+            <div class="field-group">
+              <label for="window_width">{{ width_label }}</label>
+              <input id="window_width" name="window_width" type="number" min="640" value="{{ viewport_width }}">
+            </div>
+            <div class="field-group">
+              <label for="window_height">{{ height_label }}</label>
+              <input id="window_height" name="window_height" type="number" min="480" value="{{ viewport_height }}">
+            </div>
+          </div>
+          <div class="actions">
+            <button id="run-button" class="primary" type="submit">
+              <span class="spinner" aria-hidden="true"></span>
+              <span id="run-button-label">{{ run_task_label }}</span>
+            </button>
+            <button id="reset-button" class="secondary" type="button">{{ reset_label }}</button>
+            <button id="stop-button" class="secondary" type="button" disabled>{{ force_stop_label }}</button>
+          </div>
+        </form>
+        <p id="notice" class="notice" style="display:none;"></p>
+        <p id="error" class="error" style="display:none;"></p>
+      </div>
+      <div class="side-stack">
+        <details class="panel live-run live-run-card" open>
+          <summary class="live-head">
+            <span>{{ current_run_label }}</span>
+            <span class="badge"><span class="pulse"></span><span id="live-status">{{ idle_label }}</span></span>
+          </summary>
+          <div class="progress-bar" id="progress-bar"></div>
+          <div class="live-run-body">
+            <div class="run-row">
+              <strong>{{ page_title_label }}</strong>
+              <div id="live-page-title">{{ data.page_title or "-" }}</div>
+            </div>
+            <details class="latest-step-details" open>
+              <summary>{{ current_step_label }}</summary>
+              <div class="latest-step-content" id="latest-step">{{ data.latest_step_html|safe }}</div>
+            </details>
+          </div>
+        </details>
+        <div class="panel trace-panel">
+          <div class="live-head">
+            <span>{{ live_trace_label }}</span>
+            <div class="live-head-actions">
+              <label class="toggle-switch-inline">
+                <span class="toggle-label">{{ expand_all_label }}</span>
+                <input type="checkbox" id="trace-toggle" checked>
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="badge"><span id="live-step-badge">{{ current_step }}</span></span>
+            </div>
+          </div>
+          <div class="trace-list" id="trace-list">{{ data.trace_html|safe }}</div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <div id="history-backdrop" class="drawer-backdrop"></div>
+  <aside id="history-drawer" class="drawer" aria-hidden="true">
+    <div class="panel drawer-panel">
+      <div class="drawer-head">
+        <h2 style="margin:0;">{{ history_label }}</h2>
+        <div class="top-actions">
+          <button id="history-clear" class="secondary" type="button">{{ clear_history_label }}</button>
+          <button id="history-close" class="secondary" type="button">{{ history_close_label }}</button>
+        </div>
+      </div>
+      <div class="history" id="history">{{ data.history_html|safe }}</div>
+    </div>
+  </aside>
+  <script>
+    window.MolmoWebConfig = {
+      lang: {{ lang|tojson }},
+      text: {{ text_json|safe }},
+      windowSizeInvalidText: {{ window_size_invalid_text|tojson }}
+    };
+  </script>
+  <script src="/static/js/gui.js"></script>
+  <script data-name="BMC-Widget" data-cfasync="false" src="https://cdnjs.buymeacoffee.com/1.0.0/widget.prod.min.js" data-id="sawac" data-description="Support me on Buy me a coffee!" data-message="" data-color="#40DCA5" data-position="Right" data-x_margin="18" data-y_margin="18"></script>
+</body>
+
+</html>
